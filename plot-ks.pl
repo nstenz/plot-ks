@@ -208,7 +208,7 @@ close($ka_ks_calculator_output);
 
 # Create PDF plot of output
 print "Creating Ks plot in R...\n";
-system("echo \"pdf(file='$transcriptome-ks.pdf'); 
+system("echo \"pdf(file='$input_root-ks.pdf'); 
 	data=read.csv('$transcriptome.csv'); 
 	dat1 <- data\\\$ks[data\\\$ks < $ks_max]; 
 	hist(dat1, breaks=seq($ks_min,$ks_max,by=$bin_size), 
