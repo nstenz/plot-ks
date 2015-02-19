@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Cwd;
 use Getopt::Long;
+use File::Path qw(remove_tree);
 
 # Hash used to perform reverse translations
 my %rev_codon_table = (
@@ -81,10 +82,7 @@ my $transdecoder_out_dir = "ks-plot-transdecoder";
 system("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir") && die;
 
 # Clean up unneeded files
-chdir($transdecoder_out_dir);
-unlink(glob("*"));
-rmdir($transdecoder_out_dir);
-chdir("..");
+remove_tree($transdecoder_out_dir);
 
 print "Completed TransDecoder.\n\n";
 
@@ -164,6 +162,7 @@ while (my $line = <$blat_out>) {
 	}
 }
 
+# Prepare for output
 foreach my $key (sort { $a cmp $b} keys %matches) {
 	my $pair = $matches{$key};
 	push(@output, ">$key\n");
