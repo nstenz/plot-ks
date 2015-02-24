@@ -90,7 +90,7 @@ if (!$input_is_dir) {
 	mkdir($project_name) if (!-e $project_name) || die "Could not create directory '$project_name': $!.\n";
 
 	$transcriptome =~ s/.*\///;
-	system("ln $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
+	system("ln -s $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
 	($input_root = $transcriptome) =~ s/(.*)\.\S+$/$1/;
 }
 else {
