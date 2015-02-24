@@ -30,6 +30,9 @@ my %rev_codon_table = (
 	X => qr/.../,
 );
 
+# Will contain PID of process running pipeline
+my $pid;
+
 # Allowed models 
 my %models = (NG => 1, LWL => 1, LPB => 1, MLWL => 1, MLPB => 1, 
               GY => 1, YN => 1, MYN => 1, MS => 1, MA => 1);
@@ -144,6 +147,11 @@ else {
 	}
 }
 
+$pid = fork();
+
+if ($pid == 0) {
+
+	$SIG{TERM} = 'TERM_handler';
 # Echo script invocation
 logger("Invocation: perl plot-ks.pl $settings");
 
@@ -160,6 +168,11 @@ parse_ks_values();
 
 # Create the final plot
 create_ks_plot();
+exit(0);
+}
+else {
+	waitpid($pid, 0);
+}
 
 sub run_transdecoder {
 
@@ -458,6 +471,11 @@ sub logger {
 }
 
 sub INT_handler {
+	kill(15, $pid);
+	exit(0);
+}
+
+sub TERM_handler {
 	logger("\rKeyboard interupt detected, stopping analyses and cleaning up.");
 
 	# Move back into the directory script was called in
