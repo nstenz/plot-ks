@@ -121,237 +121,261 @@ my $blat_out = "self-blat.pslx";
 my $paralogs_seqs = "paralogs-t$match_length_threshold.atx";
 my $paralogs_ks = "paralogs-t$match_length_threshold-m$model.atx";
 my $paralogs_ka_ks_out = "paralogs-t$match_length_threshold-m$model.kaks";
-
-#my $final_ks_values;
-#if ($exclude_zero) {
-#	$final_ks_values = "paralogs-t$match_length_threshold-m$model-no_zero.csv";
-#}
-#else {
-#	$final_ks_values = "paralogs-t$match_length_threshold-m$model-with_zero.csv";
-#}
 my $final_ks_values = "paralogs-t$match_length_threshold-m$model.csv";
 
-my $ks_plot_name;
+my $ks_plot_name = "$input_root-t$match_length_threshold-m$model";
 if ($exclude_zero) {
 	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-no_zero-ks$ks_min-$ks_max.pdf";
 	if ($bin_size == 0) {
-		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-density-range\(0-$ks_max].pdf";
+		$ks_plot_name .= "-density-range\(0-$ks_max].pdf";
 	}
 	else {
-		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range\(0-$ks_max].pdf";
+		$ks_plot_name .= "-b$bin_size-range\(0-$ks_max].pdf";
 	}
 }
 else {
 	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-with_zero-ks$ks_min-$ks_max.pdf";
 	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range[$ks_min-$ks_max].pdf";
 	if ($bin_size == 0) {
-		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-density-range[0-$ks_max].pdf";
+		$ks_plot_name = "-density-range[0-$ks_max].pdf";
 	}
 	else {
-		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range[0-$ks_max].pdf";
+		$ks_plot_name = "-b$bin_size-range[0-$ks_max].pdf";
 	}
 }
 
-# Print invocation
+# Echo script invocation
 logger("Invocation: perl plot-ks.pl $settings");
 
-# Run TransDecoder
-my $transdecoder_out_dir = "transdecoder";
-if (!-e "$transcriptome.transdecoder.pep") {
-	logger("\nRunning TransDecoder on '$transcriptome'...");
-	system("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir") && die;
+# Translate transcriptome into most likely proteome
+run_transdecoder();
 
-	# Clean up unneeded files
-	remove_tree($transdecoder_out_dir);
+# Identify paralogs
+run_self_blat();
+parse_self_blat_output();
 
-	logger("Completed TransDecoder.\n");
+# Calculate Ks for paralogs
+run_kaks_calc();
+parse_ks_values();
+
+# Create the final plot
+create_ks_plot();
+
+sub run_transdecoder {
+
+	my $transdecoder_out_dir = "transdecoder";
+
+	# Check if we've already run transdecoder
+	if (!-e "$transcriptome.transdecoder.pep" || !-e "$transcriptome.transdecoder.mRNA") {
+		logger("\nRunning TransDecoder on '$transcriptome'...");
+		system("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir") && die;
+
+		# Clean up unneeded files
+		remove_tree($transdecoder_out_dir);
+
+		logger("Completed TransDecoder.\n");
+	}
+	else {
+		logger("\nUsing TransDecoder output from previous run.");
+	}
 }
-else {
-	logger("\nUsing TransDecoder output from previous run.");
+
+sub run_self_blat {
+
+	# Check if we've already run blat
+	if (!-e $blat_out) {
+		logger("Running self blat...");
+		system("$blat $transcriptome.transdecoder.pep $transcriptome.transdecoder.pep -prot -out=pslx self-blat.pslx -noHead") && die;
+		logger("Completed self blat.\n");
+	}
+	else {
+		logger("Using blat output from previous run in '$blat_out'.");
+	}
 }
 
-# Check if we've already run blat
-if (!-e $blat_out) {
-	logger("Running self blat...");
-	system("$blat $transcriptome.transdecoder.pep $transcriptome.transdecoder.pep -prot -out=pslx self-blat.pslx -noHead") && die;
-	logger("Completed self blat.\n");
-}
-else {
-	logger("Using blat output from previous run in '$blat_out'.");
-}
+sub parse_self_blat_output {
 
-# Load transcriptome
-my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
+	# Load transcriptome
+	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 
-# Check if we've already parsed blat output
-if (!-e $paralogs_seqs) {
+	# Check if we've already parsed blat output
+	if (!-e $paralogs_seqs) {
 
-	logger("Parsing self-blat output...");
+		logger("Parsing self-blat output...");
 
-	my $id = 0;
-	my @output;
-	my %queries;
-	my %matches;
-	open(my $blat_out, "<", $blat_out);
-	while (my $line = <$blat_out>) {
-		chomp($line);
+		my $id = 0;
+		my @output;
+		my %queries;
+		my %matches;
+		open(my $blat_out, "<", $blat_out);
+		while (my $line = <$blat_out>) {
+			chomp($line);
 
-		# Split the line on tabs and extract the information we want
-		my @line = split("\t", $line);
-		my ($query_name, $match_name, $query_align, $match_align) = 
-			($line[9], $line[13], $line[21], $line[22]);
-		
-		# Check if requirements are met
-		if ($query_name ne $match_name) {
-			# Reverse translate amino acids to their corresponding nucleotides
+			# Split the line on tabs and extract the information we want
+			my @line = split("\t", $line);
+			my ($query_name, $match_name, $query_align, $match_align) = 
+				($line[9], $line[13], $line[21], $line[22]);
+			
+			# Check if requirements are met
+			if ($query_name ne $match_name) {
+				# Reverse translate amino acids to their corresponding nucleotides
 
-			my @query_align =  split(",", $query_align);
-			my @match_align =  split(",", $match_align);
+				my @query_align =  split(",", $query_align);
+				my @match_align =  split(",", $match_align);
 
-			my $query_nuc_align = $align{$query_name};
-			my $match_nuc_align = $align{$match_name};
+				my $query_nuc_align = $align{$query_name};
+				my $match_nuc_align = $align{$match_name};
 
-			my $trans_query_align;
-			foreach my $align (@query_align) {
-				$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
-			}
+				my $trans_query_align;
+				foreach my $align (@query_align) {
+					$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
+				}
 
-			my $trans_match_align;
-			foreach my $align (@match_align) {
-				$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
-			}
+				my $trans_match_align;
+				foreach my $align (@match_align) {
+					$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
+				}
 
-			$query_align = $trans_query_align;
-			$match_align = $trans_match_align;
+				$query_align = $trans_query_align;
+				$match_align = $trans_match_align;
 
-			if (length($query_align) >= $match_length_threshold && length($match_align) >= $match_length_threshold) {
+				if (length($query_align) >= $match_length_threshold && length($match_align) >= $match_length_threshold) {
 
-				# Check that the match hasn't already been extracted
-				if (!exists($queries{"$match_name-$query_name"})) {
+					# Check that the match hasn't already been extracted
+					if (!exists($queries{"$match_name-$query_name"})) {
 
-					# Remove nucleotides to make length a multiple of 3
-					die "WHUT?\n" if (length($query_align) % 3 != 0);
+						# Remove nucleotides to make length a multiple of 3
+						die "WHUT?\n" if (length($query_align) % 3 != 0);
 
-					my $name = "q_$query_name"."_t_$match_name";
-					my $pair = {'QUERY_ALIGN' => $query_align,
-								'MATCH_ALIGN' => $match_align,
-								'LENGTH' => length($query_align)};
+						my $name = "q_$query_name"."_t_$match_name";
+						my $pair = {'QUERY_ALIGN' => $query_align,
+									'MATCH_ALIGN' => $match_align,
+									'LENGTH' => length($query_align)};
 
-					# Check if there is already a match between these two sequences
-					# if there is a match, the longer length one will be output
-					if (exists($matches{$name})) {
-						my $current_length = $matches{$name}->{'LENGTH'};
-						if ($current_length <= length($query_align)) {
+						# Check if there is already a match between these two sequences
+						# if there is a match, the longer length one will be output
+						if (exists($matches{$name})) {
+							my $current_length = $matches{$name}->{'LENGTH'};
+							if ($current_length <= length($query_align)) {
+								$matches{$name} = $pair;
+							}
+						}
+						else {
 							$matches{$name} = $pair;
 						}
+						$queries{"$query_name-$match_name"}++;
 					}
-					else {
-						$matches{$name} = $pair;
-					}
-					$queries{"$query_name-$match_name"}++;
 				}
 			}
 		}
-	}
 
-	# Prepare for output
-	foreach my $key (sort { $a cmp $b} keys %matches) {
-		my $pair = $matches{$key};
-		push(@output, ">$key\n");
-		push(@output, "$pair->{QUERY_ALIGN}\n");
-		push(@output, "$pair->{MATCH_ALIGN}\n\n");
-		$id++;
-	}
-
-	
-	if ($id == 0) {
-		logger("No blat hits met the requirements.\n");
-		exit(0);
-	}
-	logger("Completed parsing blat output, $id blat hit(s) met the requirements.\n");
-
-	open(my $output_file, ">", $paralogs_seqs);
-	print {$output_file} @output;
-	close($output_file);
-}
-else {
-	logger("Using previously parsed blat output in '$paralogs_seqs'.");
-}
-
-# Check if we've run KaKs_Calculator before
-if (!-e $paralogs_ka_ks_out) {
-	# Run KaKs_Calculator to get Ks values
-	logger("Running KaKs_Calculator...");
-	system("$kaks_calculator -i $paralogs_seqs -o $paralogs_ka_ks_out -m $model >/dev/null") && die;
-	logger("Completed KaKs_Calculator.\n");
-}
-else {
-	logger("Using KaKs_Calculator output from previous run in '$paralogs_ka_ks_out'.");
-}
-
-# Check if we've parsed Ks values before
-if (!-e $final_ks_values) {
-
-	# Open KaKs_Calculator output, parse Ks values and convert to .csv for R
-	open(my $ka_ks_calculator_output, "<", $paralogs_ka_ks_out);
-	open(my $ks_csv, ">", $final_ks_values);
-	while (my $line = <$ka_ks_calculator_output>) {
-		chomp($line);
-		my @line = split(/\s+/, $line);
-
-		# Skip first line containing headers
-		if ($. == 1) {
-			print {$ks_csv} "ks\n";
-			next;
+		# Prepare for output
+		foreach my $key (sort { $a cmp $b} keys %matches) {
+			my $pair = $matches{$key};
+			push(@output, ">$key\n");
+			push(@output, "$pair->{QUERY_ALIGN}\n");
+			push(@output, "$pair->{MATCH_ALIGN}\n\n");
+			$id++;
 		}
 
-		my $ks = $line[3];
-		$ks = 0 if ($ks eq "NA");
-		#next if ($ks == 0 && $exclude_zero);
+		if ($id == 0) {
+			logger("No blat hits met the requirements.\n");
+			exit(0);
+		}
+		logger("Completed parsing blat output, $id blat hit(s) met the requirements.\n");
 
-		print {$ks_csv} "$ks\n"
-	}
-	close($ks_csv);
-	close($ka_ks_calculator_output);
-}
-
-# Create PDF plot of output
-logger("Creating Ks plot in R...");
-if ($exclude_zero) {
-	if ($bin_size == 0) {
-		system("echo \"pdf(file='$ks_plot_name'); 
-			data=read.csv('$final_ks_values'); 
-			data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
-			plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
-				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		open(my $output_file, ">", $paralogs_seqs);
+		print {$output_file} @output;
+		close($output_file);
 	}
 	else {
-		system("echo \"pdf(file='$ks_plot_name'); 
-			data=read.csv('$final_ks_values'); 
-			data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
-			hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
-				main=expression(paste('K'[s], ' Plot for $transcriptome')), 
-				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		logger("Using previously parsed blat output in '$paralogs_seqs'.");
 	}
 }
-else {
-	if ($bin_size == 0) {
-		system("echo \"pdf(file='$ks_plot_name'); 
-			data=read.csv('$final_ks_values'); 
-			data <- data\\\$ks[data\\\$ks <= $ks_max]; 
-			plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
-				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+
+sub run_kaks_calc {
+
+	# Check if we've run KaKs_Calculator before
+	if (!-e $paralogs_ka_ks_out) {
+		# Run KaKs_Calculator to get Ks values
+		logger("Running KaKs_Calculator...");
+		system("$kaks_calculator -i $paralogs_seqs -o $paralogs_ka_ks_out -m $model >/dev/null") && die;
+		logger("Completed KaKs_Calculator.\n");
 	}
 	else {
-		system("echo \"pdf(file='$ks_plot_name'); 
-			data=read.csv('$final_ks_values'); 
-			data <- data\\\$ks[data\\\$ks <= $ks_max]; 
-			hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
-				main=expression(paste('K'[s], ' Plot for $transcriptome')), 
-				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		logger("Using KaKs_Calculator output from previous run in '$paralogs_ka_ks_out'.");
 	}
 }
-logger("\nCompleted Ks plot.\n");
+
+sub parse_ks_values {
+
+	# Check if we've parsed Ks values before
+	if (!-e $final_ks_values) {
+
+		# Open KaKs_Calculator output, parse Ks values and convert to .csv for R
+		open(my $ka_ks_calculator_output, "<", $paralogs_ka_ks_out);
+		open(my $ks_csv, ">", $final_ks_values);
+		while (my $line = <$ka_ks_calculator_output>) {
+			chomp($line);
+			my @line = split(/\s+/, $line);
+
+			# Skip first line containing headers
+			if ($. == 1) {
+				print {$ks_csv} "ks\n";
+				next;
+			}
+
+			my $ks = $line[3];
+			$ks = 0 if ($ks eq "NA");
+			#next if ($ks == 0 && $exclude_zero);
+
+			print {$ks_csv} "$ks\n"
+		}
+		close($ks_csv);
+		close($ka_ks_calculator_output);
+	}
+}
+
+sub create_ks_plot {
+
+	# Create PDF plot of output
+	logger("Creating Ks plot in R...");
+	if ($exclude_zero) {
+		if ($bin_size == 0) {
+			system("echo \"pdf(file='$ks_plot_name'); 
+				data=read.csv('$final_ks_values'); 
+				data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+				plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		}
+		else {
+			system("echo \"pdf(file='$ks_plot_name'); 
+				data=read.csv('$final_ks_values'); 
+				data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+				hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
+					main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		}
+	}
+	else {
+		if ($bin_size == 0) {
+			system("echo \"pdf(file='$ks_plot_name'); 
+				data=read.csv('$final_ks_values'); 
+				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		}
+		else {
+			system("echo \"pdf(file='$ks_plot_name'); 
+				data=read.csv('$final_ks_values'); 
+				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
+					main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+		}
+	}
+	logger("\nCompleted Ks plot.\n");
+}
 
 sub reverse_translate {
 	my $settings = shift;
@@ -464,7 +488,7 @@ Generate a Ks plot for a given transcriptome in fasta format
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
   -t, --match_length_threshold      the minimum number of basepairs the matching sequences must be (default: 300 bp)
   -x, --exclude_zero                used to exclude Ks = 0 from plot, useful for Trinity transcriptomes
-  -b, --bin_size                    size of bins used in histogram of Ks plot
+  -b, --bin_size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
   --ks_min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
   --ks_max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
   -h, --help                        display this help and exit
