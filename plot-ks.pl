@@ -345,7 +345,7 @@ sub create_ks_plot {
 			system("echo \"pdf(file='$ks_plot_name'); 
 				data=read.csv('$final_ks_values'); 
 				data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
-				plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				plot(density(data), main=expression(paste('K'[s], ' Density Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
 		}
 		else {
@@ -362,7 +362,7 @@ sub create_ks_plot {
 			system("echo \"pdf(file='$ks_plot_name'); 
 				data=read.csv('$final_ks_values'); 
 				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
-				plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				plot(density(data), main=expression(paste('K'[s], ' Density Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
 		}
 		else {
