@@ -30,6 +30,10 @@ my %rev_codon_table = (
 	X => qr/.../,
 );
 
+# Allowed models 
+my %models = (NG => 1, LWL => 1, LPB => 1, MLWL => 1, MLPB => 1, 
+              GY => 1, YN => 1, MYN => 1, MS => 1, MA => 1);
+
 # Default settings
 my $model = "YN";
 my $bin_size = 0.05;
@@ -69,8 +73,11 @@ GetOptions(
 
 # Error check input
 my $transcriptome = shift;
-die "You must specify a transcriptome for input.\n".&usage if (!defined($transcriptome));
+die "You must specify a FASTA file containing transcriptome data for input OR the output directory from the previous execution of this script.\n".&usage if (!defined($transcriptome));
 die "Could not locate '$transcriptome'.\n".&usage if (!-e $transcriptome);
+die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size < 0);
+die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
+die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
 
 # Input is a previous run directory, reuse information
 $input_is_dir++ if (-d $transcriptome);
@@ -83,7 +90,7 @@ if (!$input_is_dir) {
 	mkdir($project_name) if (!-e $project_name) || die "Could not create directory '$project_name': $!.\n";
 
 	$transcriptome =~ s/.*\///;
-	system("ln -s $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
+	system("ln $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
 	($input_root = $transcriptome) =~ s/(.*)\.\S+$/$1/;
 }
 else {
@@ -115,20 +122,34 @@ my $paralogs_seqs = "paralogs-t$match_length_threshold.atx";
 my $paralogs_ks = "paralogs-t$match_length_threshold-m$model.atx";
 my $paralogs_ka_ks_out = "paralogs-t$match_length_threshold-m$model.kaks";
 
-my $final_ks_values;
-if ($exclude_zero) {
-	$final_ks_values = "paralogs-t$match_length_threshold-m$model-no_zero.csv";
-}
-else {
-	$final_ks_values = "paralogs-t$match_length_threshold-m$model-with_zero.csv";
-}
+#my $final_ks_values;
+#if ($exclude_zero) {
+#	$final_ks_values = "paralogs-t$match_length_threshold-m$model-no_zero.csv";
+#}
+#else {
+#	$final_ks_values = "paralogs-t$match_length_threshold-m$model-with_zero.csv";
+#}
+my $final_ks_values = "paralogs-t$match_length_threshold-m$model.csv";
 
 my $ks_plot_name;
 if ($exclude_zero) {
-	$ks_plot_name = "$input_root-t$match_length_threshold-m$model-no_zero-ks$ks_min-$ks_max.pdf";
+	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-no_zero-ks$ks_min-$ks_max.pdf";
+	if ($bin_size == 0) {
+		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-density-range\(0-$ks_max].pdf";
+	}
+	else {
+		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range\(0-$ks_max].pdf";
+	}
 }
 else {
-	$ks_plot_name = "$input_root-t$match_length_threshold-m$model-with_zero-ks$ks_min-$ks_max.pdf";
+	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-with_zero-ks$ks_min-$ks_max.pdf";
+	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range[$ks_min-$ks_max].pdf";
+	if ($bin_size == 0) {
+		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-density-range[0-$ks_max].pdf";
+	}
+	else {
+		$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range[0-$ks_max].pdf";
+	}
 }
 
 # Print invocation
@@ -137,31 +158,25 @@ logger("Invocation: perl plot-ks.pl $settings");
 # Run TransDecoder
 my $transdecoder_out_dir = "transdecoder";
 if (!-e "$transcriptome.transdecoder.pep") {
-	#print "\nRunning TransDecoder on '$transcriptome'...\n";
 	logger("\nRunning TransDecoder on '$transcriptome'...");
 	system("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir") && die;
 
 	# Clean up unneeded files
 	remove_tree($transdecoder_out_dir);
 
-	#print "Completed TransDecoder.\n\n";
 	logger("Completed TransDecoder.\n");
 }
 else {
-	#print "\nUsing TransDecoder output from previous run.\n";
 	logger("\nUsing TransDecoder output from previous run.");
 }
 
 # Check if we've already run blat
 if (!-e $blat_out) {
-	#print "Running self blat...\n";
 	logger("Running self blat...");
 	system("$blat $transcriptome.transdecoder.pep $transcriptome.transdecoder.pep -prot -out=pslx self-blat.pslx -noHead") && die;
-	#print "Completed self blat.\n\n";
 	logger("Completed self blat.\n");
 }
 else {
-	#print "Using blat output from previous run.\n\n";
 	logger("Using blat output from previous run in '$blat_out'.");
 }
 
@@ -171,7 +186,6 @@ my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 # Check if we've already parsed blat output
 if (!-e $paralogs_seqs) {
 
-	#print "Parsing self blat output...\n";
 	logger("Parsing self-blat output...");
 
 	my $id = 0;
@@ -250,8 +264,6 @@ if (!-e $paralogs_seqs) {
 	}
 
 	
-	#die "No blat hits met the requirements.\n\n" if ($id == 0);
-	#print "Completed parsing blat output, $id blat hit(s) met the requirements.\n\n";
 	if ($id == 0) {
 		logger("No blat hits met the requirements.\n");
 		exit(0);
@@ -263,17 +275,14 @@ if (!-e $paralogs_seqs) {
 	close($output_file);
 }
 else {
-	#print "Using previously parsed blat output.\n\n";
 	logger("Using previously parsed blat output in '$paralogs_seqs'.");
 }
 
 # Check if we've run KaKs_Calculator before
 if (!-e $paralogs_ka_ks_out) {
 	# Run KaKs_Calculator to get Ks values
-	#print "Running KaKs_Calculator...\n";
 	logger("Running KaKs_Calculator...");
 	system("$kaks_calculator -i $paralogs_seqs -o $paralogs_ka_ks_out -m $model >/dev/null") && die;
-	#print "Completed KaKs_Calculator.\n\n";
 	logger("Completed KaKs_Calculator.\n");
 }
 else {
@@ -298,7 +307,7 @@ if (!-e $final_ks_values) {
 
 		my $ks = $line[3];
 		$ks = 0 if ($ks eq "NA");
-		next if ($ks == 0 && $exclude_zero);
+		#next if ($ks == 0 && $exclude_zero);
 
 		print {$ks_csv} "$ks\n"
 	}
@@ -307,16 +316,41 @@ if (!-e $final_ks_values) {
 }
 
 # Create PDF plot of output
-#print "Creating Ks plot in R...\n";
 logger("Creating Ks plot in R...");
-system("echo \"pdf(file='$ks_plot_name'); 
-	#data=read.csv('$transcriptome.csv'); 
-	data=read.csv('$final_ks_values'); 
-	dat1 <- data\\\$ks[data\\\$ks < $ks_max]; 
-	hist(dat1, breaks=seq($ks_min,$ks_max,by=$bin_size), 
-		main=expression(paste('K'[s], ' Plot for $transcriptome')), 
-		xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
-#print "\nCompleted Ks plot.\n";
+if ($exclude_zero) {
+	if ($bin_size == 0) {
+		system("echo \"pdf(file='$ks_plot_name'); 
+			data=read.csv('$final_ks_values'); 
+			data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+			plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+	}
+	else {
+		system("echo \"pdf(file='$ks_plot_name'); 
+			data=read.csv('$final_ks_values'); 
+			data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+			hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
+				main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+	}
+}
+else {
+	if ($bin_size == 0) {
+		system("echo \"pdf(file='$ks_plot_name'); 
+			data=read.csv('$final_ks_values'); 
+			data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+			plot(density(data), main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+	}
+	else {
+		system("echo \"pdf(file='$ks_plot_name'); 
+			data=read.csv('$final_ks_values'); 
+			data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+			hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
+				main=expression(paste('K'[s], ' Plot for $transcriptome')), 
+				xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
+	}
+}
 logger("\nCompleted Ks plot.\n");
 
 sub reverse_translate {
