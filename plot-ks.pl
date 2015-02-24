@@ -1,9 +1,14 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use POSIX;
 use Getopt::Long;
 use Cwd qw(abs_path);
 use File::Path qw(remove_tree);
+
+# TODO: add support for multi-threading
+my $previous_max_forks;
+my $max_forks = get_free_cpus();
 
 # Hash used to perform reverse translations
 my %rev_codon_table = (
@@ -53,6 +58,9 @@ my $input_is_dir = 0;
 # Name of output directory
 my $project_name = "plot-ks-".time();
 
+my $kaks_calc_in_dir = "kaks-in";
+my $kaks_calc_out_dir = "kaks-out";
+
 # Check that dependencies can be found in user's PATH
 my $r = check_path_for_exec("R");
 my $blat = check_path_for_exec("blat");
@@ -89,8 +97,11 @@ my $input_root;
 if (!$input_is_dir) {
 	my $transcriptome_abs_path = abs_path($transcriptome);
 
-	# Initialize our working directory and create symlink to transcriptome
+	# Initialize our working directories and create a symlink to input
 	mkdir($project_name) if (!-e $project_name) || die "Could not create directory '$project_name': $!.\n";
+
+#	mkdir($kaks_calc_in_dir) || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
+#	mkdir($kaks_calc_out_dir) || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
 
 	$transcriptome =~ s/.*\///;
 	system("ln -s $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
@@ -111,6 +122,12 @@ else {
 	}
 	($input_root = $transcriptome) =~ s/(.*)\.\S+$/$1/;
 
+	# For simplicity we will reuse the same number of forks 
+	if (-e "$project_name/$kaks_calc_in_dir") {
+		@contents = glob("$project_name/*$kaks_calc_in_dir");
+		$previous_max_forks = scalar(@contents);
+	}
+
 	die "Could not locate transcriptome in '$project_name'.\n" if (!$found_name);
 }
 
@@ -122,13 +139,14 @@ $SIG{INT} = 'INT_handler';
 # Set up output file names
 my $blat_out = "self-blat.pslx";
 my $paralogs_seqs = "paralogs-t$match_length_threshold.atx";
-my $paralogs_ks = "paralogs-t$match_length_threshold-m$model.atx";
 my $paralogs_ka_ks_out = "paralogs-t$match_length_threshold-m$model.kaks";
+#my $paralogs_seqs = "$kaks_calc_in_dir/paralogs-t$match_length_threshold.atx";
+#my $paralogs_ka_ks_out = "$kaks_calc_out_dir/paralogs-t$match_length_threshold-m$model.kaks";
 my $final_ks_values = "paralogs-t$match_length_threshold-m$model.csv";
 
+# Output plot name varies based on bin size and Ks range
 my $ks_plot_name = "$input_root-t$match_length_threshold-m$model";
 if ($exclude_zero) {
-	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-no_zero-ks$ks_min-$ks_max.pdf";
 	if ($bin_size == 0) {
 		$ks_plot_name .= "-density-range\(0-$ks_max].pdf";
 	}
@@ -137,38 +155,39 @@ if ($exclude_zero) {
 	}
 }
 else {
-	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-with_zero-ks$ks_min-$ks_max.pdf";
-	#$ks_plot_name = "$input_root-t$match_length_threshold-m$model-b$bin_size-range[$ks_min-$ks_max].pdf";
 	if ($bin_size == 0) {
-		$ks_plot_name = "-density-range[0-$ks_max].pdf";
+		$ks_plot_name .= "-density-range[0-$ks_max].pdf";
 	}
 	else {
-		$ks_plot_name = "-b$bin_size-range[0-$ks_max].pdf";
+		$ks_plot_name .= "-b$bin_size-range[0-$ks_max].pdf";
 	}
 }
 
 $pid = fork();
 
+# Child fork
 if ($pid == 0) {
 
+	# Cleans up if cancelled
 	$SIG{TERM} = 'TERM_handler';
-# Echo script invocation
-logger("Invocation: perl plot-ks.pl $settings");
 
-# Translate transcriptome into most likely proteome
-run_transdecoder();
+	# Echo script invocation
+	logger("Invocation: perl plot-ks.pl $settings");
 
-# Identify paralogs
-run_self_blat();
-parse_self_blat_output();
+	# Translate transcriptome into most likely proteome
+	run_transdecoder();
 
-# Calculate Ks for paralogs
-run_kaks_calc();
-parse_ks_values();
+	# Identify paralogs
+	run_self_blat();
+	parse_self_blat_output();
 
-# Create the final plot
-create_ks_plot();
-exit(0);
+	# Calculate Ks for paralogs
+	run_kaks_calc();
+	parse_ks_values();
+
+	# Create the final plot
+	create_ks_plot();
+	exit(0);
 }
 else {
 	waitpid($pid, 0);
@@ -228,56 +247,57 @@ sub parse_self_blat_output {
 			my @line = split("\t", $line);
 			my ($query_name, $match_name, $query_align, $match_align) = 
 				($line[9], $line[13], $line[21], $line[22]);
+
+			# Don't want self matches
+			next if ($query_name eq $match_name);
 			
-			# Check if requirements are met
-			if ($query_name ne $match_name) {
-				# Reverse translate amino acids to their corresponding nucleotides
+			# Reverse translate amino acids to their corresponding nucleotides
 
-				my @query_align =  split(",", $query_align);
-				my @match_align =  split(",", $match_align);
+			my @query_align =  split(",", $query_align);
+			my @match_align =  split(",", $match_align);
 
-				my $query_nuc_align = $align{$query_name};
-				my $match_nuc_align = $align{$match_name};
+			my $query_nuc_align = $align{$query_name};
+			my $match_nuc_align = $align{$match_name};
 
-				my $trans_query_align;
-				foreach my $align (@query_align) {
-					$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
-				}
+			my $trans_query_align;
+			foreach my $align (@query_align) {
+				$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
+			}
 
-				my $trans_match_align;
-				foreach my $align (@match_align) {
-					$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
-				}
+			my $trans_match_align;
+			foreach my $align (@match_align) {
+				$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
+			}
 
-				$query_align = $trans_query_align;
-				$match_align = $trans_match_align;
+			$query_align = $trans_query_align;
+			$match_align = $trans_match_align;
 
-				if (length($query_align) >= $match_length_threshold && length($match_align) >= $match_length_threshold) {
+			# Check length threshold is met
+			if (length($query_align) >= $match_length_threshold) {
 
-					# Check that the match hasn't already been extracted
-					if (!exists($queries{"$match_name-$query_name"})) {
+				# Check that the match hasn't already been extracted
+				if (!exists($queries{"$match_name-$query_name"})) {
 
-						# Remove nucleotides to make length a multiple of 3
-						die "WHUT?\n" if (length($query_align) % 3 != 0);
+					# Remove nucleotides to make length a multiple of 3
+					die "WHUT?\n" if (length($query_align) % 3 != 0);
 
-						my $name = "q_$query_name"."_t_$match_name";
-						my $pair = {'QUERY_ALIGN' => $query_align,
-									'MATCH_ALIGN' => $match_align,
-									'LENGTH' => length($query_align)};
+					my $name = "q_$query_name"."_t_$match_name";
+					my $pair = {'QUERY_ALIGN' => $query_align,
+								'MATCH_ALIGN' => $match_align,
+								'LENGTH' => length($query_align)};
 
-						# Check if there is already a match between these two sequences
-						# if there is a match, the longer length one will be output
-						if (exists($matches{$name})) {
-							my $current_length = $matches{$name}->{'LENGTH'};
-							if ($current_length <= length($query_align)) {
-								$matches{$name} = $pair;
-							}
-						}
-						else {
+					# Check if there is already a match between these two sequences
+					# if there is a match, the longer length one will be output
+					if (exists($matches{$name})) {
+						my $current_length = $matches{$name}->{'LENGTH'};
+						if ($current_length <= length($query_align)) {
 							$matches{$name} = $pair;
 						}
-						$queries{"$query_name-$match_name"}++;
 					}
+					else {
+						$matches{$name} = $pair;
+					}
+					$queries{"$query_name-$match_name"}++;
 				}
 			}
 		}
@@ -492,6 +512,53 @@ sub TERM_handler {
 	logger("Could not clean all files in './$project_name/'.") if ($count == 5);
 
 	exit(0);
+}
+
+sub get_free_cpus {
+
+	my $os_name = $^O;
+
+	# Returns a two-member array containing CPU usage observed by top,
+	# top is run twice as its first output is usually inaccurate
+	my @percent_free_cpu;
+	if ($os_name eq "darwin") {
+		# Mac OS
+		chomp(@percent_free_cpu = `top -i 1 -l 2 | grep "CPU usage"`);
+	}
+	else {
+		# Linux
+		chomp(@percent_free_cpu = `top -bn2d0.05 | grep "Cpu(s)"`);
+	}
+
+	my $percent_free_cpu = pop(@percent_free_cpu);
+
+	if ($os_name eq "darwin") {
+		# Mac OS
+		$percent_free_cpu =~ s/.*?(\d+\.\d+)%\s+id.*/$1/;
+	}
+	else {
+		# linux 
+		$percent_free_cpu =~ s/.*?(\d+\.\d)\s*%?ni,\s*(\d+\.\d)\s*%?id.*/$1 + $2/; # also includes %nice as free 
+		$percent_free_cpu = eval($percent_free_cpu);
+	}
+
+	my $total_cpus;
+	if ($os_name eq "darwin") {
+		# Mac OS
+		$total_cpus = `sysctl -n hw.ncpu`;
+	}
+	else {
+		# linux
+		$total_cpus = `grep --count 'cpu' /proc/stat` - 1;
+	}
+
+	my $free_cpus = ceil($total_cpus * $percent_free_cpu / 100);
+
+	if ($free_cpus == 0 || $free_cpus !~ /^\d+$/) {
+		$free_cpus = 1; # assume that at least one cpu can be used
+	}
+	
+	return $free_cpus;
 }
 
 sub usage {
