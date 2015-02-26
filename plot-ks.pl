@@ -232,11 +232,12 @@ sub run_self_blat {
 
 sub parse_self_blat_output_child {
 	#my ($file, $align) = @_;
-	my ($file, $handle, $align) = @_;
+	#my ($file, $handle, $align) = @_;
+	my ($file, $handle) = @_;
 
-	my %align = %{$align};
-
-	my $count = 0;
+	#my %align = %{$align};
+	#my %align;
+	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 
 	#my %queries;
 	my %matches;
@@ -259,6 +260,25 @@ sub parse_self_blat_output_child {
 
 		my $query_nuc_align = $align{$query_name};
 		my $match_nuc_align = $align{$match_name};
+
+	#	my $query_nuc_align;
+	#	my $match_nuc_align;
+	#	if (exists($align{$query_name})) {
+	#		$query_nuc_align = $align{$query_name};
+	#	}
+	#	else {
+	#		$query_nuc_align = get_seq_from_fasta({'FILE' => "$transcriptome.transdecoder.mRNA", 'TAXON' => $query_name});
+	#		$align{$query_name} = $query_nuc_align;
+
+	#	}
+
+	#	if (exists($align{$match_name})) {
+    #        $match_nuc_align = $align{$match_name};
+	#	}
+	#	else {
+	#		$match_nuc_align = get_seq_from_fasta({'FILE' => "$transcriptome.transdecoder.mRNA", 'TAXON' => $match_name});
+    #        $align{$match_name} = $match_nuc_align;
+	#	}
 
 		my $trans_query_align;
 		foreach my $align (@query_align) {
@@ -283,8 +303,6 @@ sub parse_self_blat_output_child {
 #				die "WHUT?\n" if (length($query_align) % 3 != 0);
 #
 
-				$count++;
-	
 				#my $name = "q_$query_name"."_t_$match_name";
 			#	my $pair = {'QUERY_ALIGN' => $query_align,
 			#				'MATCH_ALIGN' => $match_align,
@@ -308,7 +326,7 @@ sub parse_self_blat_output_child {
 				#store_fd(\%hit, $handle) if $should_store == 1;
 			#	print "$$ hit stored ($count)\n";
 #
-#				# Check if there is already a match between these two sequences
+#				# Check if there is already a match between these two seque
 #				# if there is a match, the longer length one will be output
 #				if (exists($matches{$name})) {
 #					my $current_length = $matches{$name}->{'LENGTH'};
@@ -330,7 +348,7 @@ sub parse_self_blat_output_child {
 sub parse_self_blat_output {
 
 	# Load transcriptome
-	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
+	#my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 
 	# Check if we've already parsed blat output
 	if (!-e $paralogs_seqs) {
@@ -342,9 +360,12 @@ sub parse_self_blat_output {
 
 		my $lines_per_thread = ceil($total_hits / $max_forks);
 
-		print "lines per file: $lines_per_thread\n";
+		#print "lines per file: $lines_per_thread\n";
 
 		system("split $blat_out $split_blat_out_dir/$blat_out. -l $lines_per_thread");
+
+		# Prevent zombie creation
+		#$SIG{CHLD} = 'IGNORE';
 
 		my @pids;
 		my $select = new IO::Select;
@@ -353,42 +374,29 @@ sub parse_self_blat_output {
 			my $pipe = new IO::Pipe;	
 			my $pid = fork();
 
-			# Child
 			if ($pid == 0) {
+				# Child
 				my $to_parent = $pipe->writer();
 				#$to_parent->blocking(0);
 				#$to_parent->blocking(1);
 				#$to_parent->autoflush(1);
-
-				#exit(0) if ($file !~ /\.aa$/ || $file !~ /\.ab/);
-				#exit(0) if ($file !~ /\.aa$/);
-
-				# Parse the results
-				#my $hits = parse_self_blat_output_child($file, \%align);
-				#my $hits = parse_self_blat_output_child($file, $to_parent, \%align);
 				#parse_self_blat_output_child($file, $to_parent, \%align);
-				parse_self_blat_output_child($file, $to_parent, \%align);
+				parse_self_blat_output_child($file, $to_parent);
 
-				#store_fd($hits, $to_parent);
-
-			#	my %hash = (1 => $$);
-			#	store_fd(\%hash, $to_parent);
 				until(Storable::is_storing() == 0){};
-				#my %hash = (DONE => $$);
-				#store_fd(\%hash, $to_parent);
 				store_fd({DONE => $$}, $to_parent);
 
 				exit(0);
 			}
 			else {
+				# Parent
 				my $from_child = $pipe->reader();
 				$select->add($from_child);
 				push(@pids, $pid);
 			}
 		}
-		#sleep(5);
 
-		my $count = 0;
+		# Retrieve and parse output returned by forks
 
 		my $id = 0;
 		my %queries;
@@ -397,9 +405,8 @@ sub parse_self_blat_output {
 
 			my $handle = shift(@handles);
 			my %hit = %{fd_retrieve($handle)};
-			#use Data::Dumper;$Data::Dumper::Useqq=1;print Dumper \%hit;
-			$count++;
 			if (exists($hit{"DONE"})) {
+				waitpid($hit{"DONE"}, 0);
 				$select->remove($handle);
 				$handle->close();
 				next;
@@ -408,27 +415,26 @@ sub parse_self_blat_output {
 				my $query_name = $hit{'QUERY_NAME'};
 				my $match_name = $hit{'MATCH_NAME'};
 
+				# Check for hit with same pair but with query/match reversed
 				if (!exists($queries{"$match_name-$query_name"})) {
 
 					my $name = "q_$query_name"."_t_$match_name";
 
+					# Check if there is already a match between these two seque
+					# if there is a match, the longer length one will be output
 					if (exists($matches{$name})) {
 						my $current_length = $matches{$name}->{'LENGTH'};
-						#if ($current_length <= length($query_align)) {
 						if ($current_length <= $hit{'LENGTH'}) {
-							#$matches{$name} = $pair;
 							$matches{$name} = \%hit;
 						}
 					}
 					else {
-						#$matches{$name} = $pair;
 						$matches{$name} = \%hit;
 					}
 					$queries{"$query_name-$match_name"}++;
 				}
 			}
 		}
-		print "$count hashes received\n";
 
 		foreach my $pid (@pids) {
 			waitpid($pid, 0);
@@ -519,7 +525,7 @@ sub parse_self_blat_output {
 		open(my $output_file, ">", $paralogs_seqs);
 		print {$output_file} @output;
 		close($output_file);
-		die;
+		#die;
 	}
 	else {
 		logger("Using previously parsed blat output in '$paralogs_seqs'.");
@@ -719,6 +725,36 @@ sub TERM_handler {
 	}
 
 	exit(0);
+}
+
+sub get_seq_from_fasta {
+	my $args = shift;
+
+	my $file = $args->{'FILE'};
+	my $taxon = $args->{'TAXON'};
+
+	my $seq;
+	my $is_desired_seq;
+
+	# Traverse file until desired contig is found
+
+	open(my $align, "<", $file);
+	while (my $line = <$align>) {
+		chomp($line);
+
+		if ($line =~ /^>\Q$taxon\E/) {
+			$is_desired_seq++;
+		}
+		elsif ($line =~ /^>/ && $is_desired_seq) {
+			last;
+		}
+		elsif ($is_desired_seq) {
+			$seq .= $line;
+		}
+	}
+	close($align);
+
+	return $seq;
 }
 
 sub get_free_cpus {
