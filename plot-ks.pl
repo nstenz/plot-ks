@@ -9,7 +9,7 @@ use Cwd qw(abs_path);
 use File::Path qw(remove_tree);
 use Storable qw(fd_retrieve store_fd);
 
-# TODO: add support for multi-threading
+# Most process we run simultaneously
 my $max_forks = get_free_cpus();
 
 # Hash used to perform reverse translations
@@ -36,9 +36,6 @@ my %rev_codon_table = (
 	G => qr/GG./,
 	X => qr/.../,
 );
-
-# Will contain PID of process running pipeline
-my $pid;
 
 # Allowed models 
 my %models = (NG => 1, LWL => 1, LPB => 1, MLWL => 1, MLPB => 1, 
@@ -80,7 +77,8 @@ GetOptions(
 	"ks_max:f" => \$ks_max,
 	"bin_size|b:f" => \$bin_size,
 	"exclude_zero|x" => \$exclude_zero,
-	"match_length_threshold|t:i" => \$match_length_threshold,
+	"min_length|l=i" => \$match_length_threshold,
+	"n_threads|T=i" => \$max_forks,
 	"help|h" => \&help,
 	"usage" => \&usage
 );
@@ -98,20 +96,21 @@ $input_is_dir++ if (-d $transcriptome);
 
 my $input_root;
 if (!$input_is_dir) {
+
+	# Clean run with no prior output
 	my $transcriptome_abs_path = abs_path($transcriptome);
 
-	# Initialize our working directories and create a symlink to input
+	# Initialize our working directory and create a symlink to input
 	mkdir($project_name) if (!-e $project_name) || die "Could not create directory '$project_name': $!.\n";
-
-#	mkdir("$project_name/$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
-#	mkdir("$project_name/$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
-#	mkdir("$project_name/$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
 
 	$transcriptome =~ s/.*\///;
 	system("ln -s $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
 	($input_root = $transcriptome) =~ s/(.*)\.\S+$/$1/;
 }
 else {
+
+	# Prior output available, set relevant variables
+
 	$project_name = $transcriptome;
 	my @contents = glob("$project_name/*");
 
@@ -159,7 +158,7 @@ else {
 	}
 }
 
-$pid = fork();
+my $pid = fork();
 
 # Child fork
 if ($pid == 0) {
@@ -193,7 +192,7 @@ sub run_transdecoder {
 
 	my $transdecoder_out_dir = "transdecoder";
 
-	# Check if we've already run transdecoder
+	# Check if the files we need from TransDecoder are present
 	if (!-e "$transcriptome.transdecoder.pep" || !-e "$transcriptome.transdecoder.mRNA") {
 		logger("\nRunning TransDecoder on '$transcriptome'...");
 		system("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir") && die;
@@ -210,20 +209,20 @@ sub run_transdecoder {
 
 sub run_self_blat {
 
-	# Check if we've already run blat
+	# Check if we've already run self-blat
 	if (!-e $blat_out) {
-		logger("Running self blat...");
+		logger("Running self-blat...");
 		system("$blat $transcriptome.transdecoder.pep $transcriptome.transdecoder.pep -prot -out=pslx self-blat.pslx -noHead") && die;
-		logger("Completed self blat.\n");
+		logger("Completed self-blat.\n");
 	}
 	else {
-		logger("Using blat output from previous run in '$blat_out'.");
+		logger("Using blat output from previous run located in '$blat_out'.");
 	}
 }
 
 sub parse_self_blat_output {
 
-	# Check if we've already parsed blat output
+	# Check if we've already parsed self-blat output
 	if (!-e $paralogs_seqs) {
 
 		logger("Parsing self-blat output...");
@@ -234,14 +233,19 @@ sub parse_self_blat_output {
 
 		my $lines_per_thread = ceil($total_hits / $max_forks);
 
-		# Create the directoriy that will hold the split blat output
+		# Create the directory that will hold the split blat output
 		mkdir("$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
+
+		# Split the output from blat
 		system("split $blat_out $split_blat_out_dir/$blat_out. -l $lines_per_thread");
+
+		# Run each parition of the blat output concurrently
 
 		my @pids;
 		my $select = new IO::Select;
-		foreach my $file (glob("$split_blat_out_dir/*")) {
+		foreach my $file (glob("$split_blat_out_dir/$blat_out.*")) {
 
+			# We need a pipe to send hashes from children to parent
 			my $pipe = new IO::Pipe;	
 			my $pid = fork();
 
@@ -273,7 +277,7 @@ sub parse_self_blat_output {
 			my $handle = shift(@handles);
 			my %hit = %{fd_retrieve($handle)};
 
-			# Fork has parsed output, close and remove it
+			# Fork has parsed output, close and remove pipe to it
 			if (exists($hit{"DONE"})) {
 				waitpid($hit{"DONE"}, 0);
 				$select->remove($handle);
@@ -300,6 +304,9 @@ sub parse_self_blat_output {
 					else {
 						$matches{$name} = \%hit;
 					}
+					
+					# Keep track of pairs so we can tell if a pair is
+					# the same but with query/match reversed
 					$queries{"$query_name-$match_name"}++;
 				}
 			}
@@ -310,18 +317,10 @@ sub parse_self_blat_output {
 			waitpid($pid, 0);
 		}
 
-#		# Prepare for output
-#		my @output;
-#		foreach my $key (sort { $a cmp $b} keys %matches) {
-#			my $pair = $matches{$key};
-#			push(@output, ">$key\n");
-#			push(@output, "$pair->{QUERY_ALIGN}\n");
-#			push(@output, "$pair->{MATCH_ALIGN}\n\n");
-#		}
-
+		# Total number of pairs found
 		my $final_hits = scalar(keys %matches);
 		
-		# Check that we actually got hits
+		# Ensure that we actually got hits
 		if ($final_hits == 0) {
 			logger("No blat hits met the requirements.\n");
 			exit(0);
@@ -337,9 +336,9 @@ sub parse_self_blat_output {
 			print {$output_file} "$pair->{QUERY_ALIGN}\n";
 			print {$output_file} "$pair->{MATCH_ALIGN}\n\n";
 		}
-		#print {$output_file} @output;
 		close($output_file);
 
+		# Clean up split files
 		remove_tree($split_blat_out_dir);
 	}
 	else {
@@ -353,6 +352,7 @@ sub parse_self_blat_output_child {
 	# Load transcriptome sequences
 	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 
+	# Parse this fork's portion of the blat output
 	my %matches;
 	open(my $blat_out, "<", $file);
 	while (my $line = <$blat_out>) {
@@ -387,7 +387,7 @@ sub parse_self_blat_output_child {
 		$query_align = $trans_query_align;
 		$match_align = $trans_match_align;
 
-		# Check length threshold is met
+		# Check that length threshold is met
 		if (length($query_align) >= $match_length_threshold) {
 			
 			# Create a hash containing all needed information on this hit
@@ -397,7 +397,7 @@ sub parse_self_blat_output_child {
 						'MATCH_ALIGN' => $match_align,
 						'LENGTH' => length($query_align)};
 
-			# Send the hash to the parent process
+			# Send the hash back to the parent process
 			until(Storable::is_storing() == 0){};
 			store_fd($pair, $handle);
 		}
@@ -426,7 +426,6 @@ sub run_kaks_calc {
 
 		# Split the files
 		system("split $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs. -l $lines_per_thread");
-
 
 		# Run each instance of KaKs_Calculator
 
@@ -543,11 +542,15 @@ sub reverse_translate {
 	my $dna = $settings->{'DNA'};
 	my $prot = $settings->{'PROT'};
 
+	# Generate Regex to perform reverse translation
+
 	my $regex;
 	foreach my $index (0 .. length($prot) - 1) {
 		my $char = substr($prot, $index, 1);
 		$regex .= $rev_codon_table{$char};
 	}
+
+	# Find the match of the Regex
 
 	my $translation;
 	if ($dna =~ /($regex)/) {
@@ -733,11 +736,12 @@ print <<EOF;
 Generate a Ks plot for a given transcriptome in fasta format
 
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
-  -t, --match_length_threshold      the minimum number of basepairs the matching sequences must be (default: 300 bp)
+  -l, --min_length                  the minimum number of basepairs the matching sequences must be (default: 300 bp)
   -x, --exclude_zero                used to exclude Ks = 0 from plot, useful for Trinity transcriptomes
   -b, --bin_size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
   --ks_min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
   --ks_max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
+  -T, --n_threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
   -h, --help                        display this help and exit
 
 Examples:
