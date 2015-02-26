@@ -10,7 +10,6 @@ use File::Path qw(remove_tree);
 use Storable qw(fd_retrieve store_fd);
 
 # TODO: add support for multi-threading
-my $previous_max_forks;
 my $max_forks = get_free_cpus();
 
 # Hash used to perform reverse translations
@@ -104,9 +103,9 @@ if (!$input_is_dir) {
 	# Initialize our working directories and create a symlink to input
 	mkdir($project_name) if (!-e $project_name) || die "Could not create directory '$project_name': $!.\n";
 
-	mkdir("$project_name/$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
-	mkdir("$project_name/$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
-	mkdir("$project_name/$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
+#	mkdir("$project_name/$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
+#	mkdir("$project_name/$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
+#	mkdir("$project_name/$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
 
 	$transcriptome =~ s/.*\///;
 	system("ln -s $transcriptome_abs_path $ENV{PWD}/$project_name/$transcriptome");
@@ -127,12 +126,6 @@ else {
 	}
 	($input_root = $transcriptome) =~ s/(.*)\.\S+$/$1/;
 
-	# For simplicity we will reuse the same number of forks 
-	if (-e "$project_name/$kaks_calc_in_dir") {
-		@contents = glob("$project_name/*$kaks_calc_in_dir");
-		$previous_max_forks = scalar(@contents);
-	}
-
 	die "Could not locate transcriptome in '$project_name'.\n" if (!$found_name);
 }
 
@@ -143,10 +136,8 @@ $SIG{INT} = 'INT_handler';
 
 # Set up output file names
 my $blat_out = "self-blat.pslx";
-#my $paralogs_seqs = "paralogs-t$match_length_threshold.atx";
-#my $paralogs_ka_ks_out = "paralogs-t$match_length_threshold-m$model.kaks";
-my $paralogs_seqs = "$kaks_calc_in_dir/paralogs-t$match_length_threshold.atx";
-my $paralogs_ka_ks_out = "$kaks_calc_out_dir/paralogs-t$match_length_threshold-m$model.kaks";
+my $paralogs_seqs = "paralogs-t$match_length_threshold.atx";
+my $paralogs_ka_ks_out = "paralogs-t$match_length_threshold-m$model.kaks";
 my $final_ks_values = "paralogs-t$match_length_threshold-m$model.csv";
 
 # Output plot name varies based on bin size and Ks range
@@ -230,142 +221,22 @@ sub run_self_blat {
 	}
 }
 
-sub parse_self_blat_output_child {
-	#my ($file, $align) = @_;
-	#my ($file, $handle, $align) = @_;
-	my ($file, $handle) = @_;
-
-	#my %align = %{$align};
-	#my %align;
-	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
-
-	#my %queries;
-	my %matches;
-	open(my $blat_out, "<", $file);
-	while (my $line = <$blat_out>) {
-		chomp($line);
-
-		# Split the line on tabs and extract the information we want
-		my @line = split("\t", $line);
-		my ($query_name, $match_name, $query_align, $match_align) = 
-			($line[9], $line[13], $line[21], $line[22]);
-
-		# Don't want self matches
-		next if ($query_name eq $match_name);
-		
-		# Reverse translate amino acids to their corresponding nucleotides
-
-		my @query_align =  split(",", $query_align);
-		my @match_align =  split(",", $match_align);
-
-		my $query_nuc_align = $align{$query_name};
-		my $match_nuc_align = $align{$match_name};
-
-	#	my $query_nuc_align;
-	#	my $match_nuc_align;
-	#	if (exists($align{$query_name})) {
-	#		$query_nuc_align = $align{$query_name};
-	#	}
-	#	else {
-	#		$query_nuc_align = get_seq_from_fasta({'FILE' => "$transcriptome.transdecoder.mRNA", 'TAXON' => $query_name});
-	#		$align{$query_name} = $query_nuc_align;
-
-	#	}
-
-	#	if (exists($align{$match_name})) {
-    #        $match_nuc_align = $align{$match_name};
-	#	}
-	#	else {
-	#		$match_nuc_align = get_seq_from_fasta({'FILE' => "$transcriptome.transdecoder.mRNA", 'TAXON' => $match_name});
-    #        $align{$match_name} = $match_nuc_align;
-	#	}
-
-		my $trans_query_align;
-		foreach my $align (@query_align) {
-			$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
-		}
-
-		my $trans_match_align;
-		foreach my $align (@match_align) {
-			$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
-		}
-
-		$query_align = $trans_query_align;
-		$match_align = $trans_match_align;
-
-		# Check length threshold is met
-		if (length($query_align) >= $match_length_threshold) {
-
-#			# Check that the match hasn't already been extracted in reverse order
-#			if (!exists($queries{"$match_name-$query_name"})) {
-#
-#				# Remove nucleotides to make length a multiple of 3
-#				die "WHUT?\n" if (length($query_align) % 3 != 0);
-#
-
-				#my $name = "q_$query_name"."_t_$match_name";
-			#	my $pair = {'QUERY_ALIGN' => $query_align,
-			#				'MATCH_ALIGN' => $match_align,
-			#				'LENGTH' => length($query_align)};
-				my $pair = {'QUERY_NAME'  => $query_name,
-				            'MATCH_NAME'  => $match_name,
-					        'QUERY_ALIGN' => $query_align,
-							'MATCH_ALIGN' => $match_align,
-							'LENGTH' => length($query_align)};
-
-				#$matches{$name} = $pair;
-				#my %hit = ($name => $pair);
-
-			#	my $should_store = int(rand(2));
-
-			#	#undef(%hit);
-				#%hit = ($$ => $count);
-				until(Storable::is_storing() == 0){};
-				store_fd($pair, $handle);
-
-				#store_fd(\%hit, $handle) if $should_store == 1;
-			#	print "$$ hit stored ($count)\n";
-#
-#				# Check if there is already a match between these two seque
-#				# if there is a match, the longer length one will be output
-#				if (exists($matches{$name})) {
-#					my $current_length = $matches{$name}->{'LENGTH'};
-#					if ($current_length <= length($query_align)) {
-#						$matches{$name} = $pair;
-#					}
-#				}
-#				else {
-#					$matches{$name} = $pair;
-#				}
-#				$queries{"$query_name-$match_name"}++;
-#			}
-		}
-	}
-
-	#return \%matches;
-}
-
 sub parse_self_blat_output {
-
-	# Load transcriptome
-	#my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
 
 	# Check if we've already parsed blat output
 	if (!-e $paralogs_seqs) {
 
 		logger("Parsing self-blat output...");
 
+		# Determine how to split the input file
 		chomp(my $total_hits = `wc -l $blat_out`);
 		$total_hits =~ s/(^\d+).*/$1/;
 
 		my $lines_per_thread = ceil($total_hits / $max_forks);
 
-		#print "lines per file: $lines_per_thread\n";
-
+		# Create the directoriy that will hold the split blat output
+		mkdir("$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
 		system("split $blat_out $split_blat_out_dir/$blat_out. -l $lines_per_thread");
-
-		# Prevent zombie creation
-		#$SIG{CHLD} = 'IGNORE';
 
 		my @pids;
 		my $select = new IO::Select;
@@ -377,12 +248,9 @@ sub parse_self_blat_output {
 			if ($pid == 0) {
 				# Child
 				my $to_parent = $pipe->writer();
-				#$to_parent->blocking(0);
-				#$to_parent->blocking(1);
-				#$to_parent->autoflush(1);
-				#parse_self_blat_output_child($file, $to_parent, \%align);
 				parse_self_blat_output_child($file, $to_parent);
 
+				# Tell the Parent we have finished
 				until(Storable::is_storing() == 0){};
 				store_fd({DONE => $$}, $to_parent);
 
@@ -398,13 +266,14 @@ sub parse_self_blat_output {
 
 		# Retrieve and parse output returned by forks
 
-		my $id = 0;
 		my %queries;
 		my %matches;
 		while (my @handles = $select->can_read) {
 
 			my $handle = shift(@handles);
 			my %hit = %{fd_retrieve($handle)};
+
+			# Fork has parsed output, close and remove it
 			if (exists($hit{"DONE"})) {
 				waitpid($hit{"DONE"}, 0);
 				$select->remove($handle);
@@ -436,109 +305,160 @@ sub parse_self_blat_output {
 			}
 		}
 
+		# Just for good measure
 		foreach my $pid (@pids) {
 			waitpid($pid, 0);
 		}
 
-#		my $id = 0;
-#		my %queries;
-#		my %matches;
-#		open(my $blat_out, "<", $blat_out);
-#		while (my $line = <$blat_out>) {
-#			chomp($line);
-#
-#			# Split the line on tabs and extract the information we want
-#			my @line = split("\t", $line);
-#			my ($query_name, $match_name, $query_align, $match_align) = 
-#				($line[9], $line[13], $line[21], $line[22]);
-#
-#			# Don't want self matches
-#			next if ($query_name eq $match_name);
-#			
-#			# Reverse translate amino acids to their corresponding nucleotides
-#
-#			my @query_align =  split(",", $query_align);
-#			my @match_align =  split(",", $match_align);
-#
-#			my $query_nuc_align = $align{$query_name};
-#			my $match_nuc_align = $align{$match_name};
-#
-#			my $trans_query_align;
-#			foreach my $align (@query_align) {
-#				$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
-#			}
-#
-#			my $trans_match_align;
-#			foreach my $align (@match_align) {
-#				$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
-#			}
-#
-#			$query_align = $trans_query_align;
-#			$match_align = $trans_match_align;
-#
-#			# Check length threshold is met
-#			if (length($query_align) >= $match_length_threshold) {
-#
-#				# Check that the match hasn't already been extracted
-#				if (!exists($queries{"$match_name-$query_name"})) {
-#
-#					# Remove nucleotides to make length a multiple of 3
-#					die "WHUT?\n" if (length($query_align) % 3 != 0);
-#
-#					my $name = "q_$query_name"."_t_$match_name";
-#					my $pair = {'QUERY_ALIGN' => $query_align,
-#								'MATCH_ALIGN' => $match_align,
-#								'LENGTH' => length($query_align)};
-#
-#					# Check if there is already a match between these two sequences
-#					# if there is a match, the longer length one will be output
-#					if (exists($matches{$name})) {
-#						my $current_length = $matches{$name}->{'LENGTH'};
-#						if ($current_length <= length($query_align)) {
-#							$matches{$name} = $pair;
-#						}
-#					}
-#					else {
-#						$matches{$name} = $pair;
-#					}
-#					$queries{"$query_name-$match_name"}++;
-#				}
-#			}
+#		# Prepare for output
+#		my @output;
+#		foreach my $key (sort { $a cmp $b} keys %matches) {
+#			my $pair = $matches{$key};
+#			push(@output, ">$key\n");
+#			push(@output, "$pair->{QUERY_ALIGN}\n");
+#			push(@output, "$pair->{MATCH_ALIGN}\n\n");
 #		}
 
-		# Prepare for output
-		my @output;
-		foreach my $key (sort { $a cmp $b} keys %matches) {
-			my $pair = $matches{$key};
-			push(@output, ">$key\n");
-			push(@output, "$pair->{QUERY_ALIGN}\n");
-			push(@output, "$pair->{MATCH_ALIGN}\n\n");
-			$id++;
-		}
-
-		if ($id == 0) {
+		my $final_hits = scalar(keys %matches);
+		
+		# Check that we actually got hits
+		if ($final_hits == 0) {
 			logger("No blat hits met the requirements.\n");
 			exit(0);
 		}
-		logger("Completed parsing blat output, $id blat hit(s) met the requirements.\n");
+		logger("Completed parsing blat output, $final_hits blat hit(s) met the requirements.\n");
 
+		# Output parsed hits	
 		open(my $output_file, ">", $paralogs_seqs);
-		print {$output_file} @output;
+		foreach my $key (sort { $a cmp $b} keys %matches) {
+			my $pair = $matches{$key};
+
+			print {$output_file} ">$key\n";
+			print {$output_file} "$pair->{QUERY_ALIGN}\n";
+			print {$output_file} "$pair->{MATCH_ALIGN}\n\n";
+		}
+		#print {$output_file} @output;
 		close($output_file);
-		#die;
+
+		remove_tree($split_blat_out_dir);
 	}
 	else {
 		logger("Using previously parsed blat output in '$paralogs_seqs'.");
 	}
 }
 
+sub parse_self_blat_output_child {
+	my ($file, $handle) = @_;
+
+	# Load transcriptome sequences
+	my %align = parse_fasta("$transcriptome.transdecoder.mRNA");
+
+	my %matches;
+	open(my $blat_out, "<", $file);
+	while (my $line = <$blat_out>) {
+		chomp($line);
+
+		# Split the line on tabs and extract the information we want
+		my @line = split("\t", $line);
+		my ($query_name, $match_name, $query_align, $match_align) = 
+			($line[9], $line[13], $line[21], $line[22]);
+
+		# Don't want self matches
+		next if ($query_name eq $match_name);
+		
+		# Reverse translate amino acids to their corresponding nucleotides
+
+		my @query_align =  split(",", $query_align);
+		my @match_align =  split(",", $match_align);
+
+		my $query_nuc_align = $align{$query_name};
+		my $match_nuc_align = $align{$match_name};
+
+		my $trans_query_align;
+		foreach my $align (@query_align) {
+			$trans_query_align .= reverse_translate({"DNA" => $query_nuc_align, "PROT" => $align});
+		}
+
+		my $trans_match_align;
+		foreach my $align (@match_align) {
+			$trans_match_align .= reverse_translate({"DNA" => $match_nuc_align, "PROT" => $align});
+		}
+
+		$query_align = $trans_query_align;
+		$match_align = $trans_match_align;
+
+		# Check length threshold is met
+		if (length($query_align) >= $match_length_threshold) {
+			
+			# Create a hash containing all needed information on this hit
+			my $pair = {'QUERY_NAME'  => $query_name,
+						'MATCH_NAME'  => $match_name,
+						'QUERY_ALIGN' => $query_align,
+						'MATCH_ALIGN' => $match_align,
+						'LENGTH' => length($query_align)};
+
+			# Send the hash to the parent process
+			until(Storable::is_storing() == 0){};
+			store_fd($pair, $handle);
+		}
+	}
+}
+
+
 sub run_kaks_calc {
 
 	# Check if we've run KaKs_Calculator before
 	if (!-e $paralogs_ka_ks_out) {
+
 		# Run KaKs_Calculator to get Ks values
 		logger("Running KaKs_Calculator...");
-		system("$kaks_calculator -i $paralogs_seqs -o $paralogs_ka_ks_out -m $model >/dev/null") && die;
+
+		# Determine how to split the input file
+		chomp(my $total_hits = `wc -l $paralogs_seqs`);
+		$total_hits =~ s/(^\d+).*/$1/;
+		$total_hits = $total_hits / 4;
+
+		my $lines_per_thread = ceil($total_hits / $max_forks) * 4;
+
+		# Create the directories that will hold the split files and their KaKs_Calculator output
+		mkdir("$kaks_calc_in_dir") || die "Could not create directory '$kaks_calc_in_dir': $!.\n";
+		mkdir("$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
+
+		# Split the files
+		system("split $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs. -l $lines_per_thread");
+
+
+		# Run each instance of KaKs_Calculator
+
+		my @pids;
+		foreach my $file (glob("$kaks_calc_in_dir/$paralogs_seqs.*")) {
+
+			(my $file_id = $file) =~ s/.*\.(\S+$)/$1/;
+
+			my $pid = fork();
+			if ($pid == 0) {
+				# Child 
+				system("$kaks_calculator -i $file -o $kaks_calc_out_dir/$paralogs_ka_ks_out.$file_id -m $model >/dev/null") && die;
+				exit(0);
+			}
+			else {
+				# Parent
+				push(@pids, $pid);
+			}
+		}
+
+		# Don't let forks become zombies
+		foreach my $pid (@pids) {
+			waitpid($pid, 0);
+		}
+
+		# Combine all the output files generated by the multiple forks
+		system("cat $kaks_calc_out_dir/$paralogs_ka_ks_out.* > $paralogs_ka_ks_out");
+
+		# Clean up
+		remove_tree($kaks_calc_in_dir);
+		remove_tree($kaks_calc_out_dir);
+
 		logger("Completed KaKs_Calculator.\n");
 	}
 	else {
@@ -564,9 +484,10 @@ sub parse_ks_values {
 				next;
 			}
 
+			next if ($line[0] eq "Sequence");
+
 			my $ks = $line[3];
 			$ks = 0 if ($ks eq "NA");
-			#next if ($ks == 0 && $exclude_zero);
 
 			print {$ks_csv} "$ks\n"
 		}
@@ -703,9 +624,10 @@ sub INT_handler {
 
 sub TERM_handler {
 
+	logger("\rKeyboard interrupt detected, stopping analyses and cleaning up.");
+
 	# We only want to clean up if the initial input was a sequence file
 	if (!$input_is_dir) {
-		logger("\rKeyboard interrupt detected, stopping analyses and cleaning up.");
 
 		# Move back into the directory script was called in
 		chdir("..");
@@ -721,40 +643,37 @@ sub TERM_handler {
 		logger("Could not clean all files in './$project_name/'.") if ($count == 5);
 	}
 	else {
-		logger("\rKeyboard interrupt detected, stopping analyses.");
+		# Clean up multithreading directories
+		my $count = 0;
+		until (!-e $kaks_calc_in_dir || $count == 5) {
+			$count++;
+
+			remove_tree($kaks_calc_in_dir, {error => \my $err});
+			sleep(1);
+		}
+		logger("Could not clean all files in './$project_name/'.") if ($count == 5);
+		undef($count);
+
+		until (!-e $kaks_calc_out_dir || $count == 5) {
+			$count++;
+
+			remove_tree($kaks_calc_out_dir, {error => \my $err});
+			sleep(1);
+		}
+		logger("Could not clean all files in './$project_name/'.") if ($count == 5);
+		undef($count);
+
+		until (!-e $split_blat_out_dir || $count == 5) {
+			$count++;
+
+			remove_tree($split_blat_out_dir, {error => \my $err});
+			sleep(1);
+		}
+		logger("Could not clean all files in './$project_name/'.") if ($count == 5);
+		undef($count);
 	}
 
 	exit(0);
-}
-
-sub get_seq_from_fasta {
-	my $args = shift;
-
-	my $file = $args->{'FILE'};
-	my $taxon = $args->{'TAXON'};
-
-	my $seq;
-	my $is_desired_seq;
-
-	# Traverse file until desired contig is found
-
-	open(my $align, "<", $file);
-	while (my $line = <$align>) {
-		chomp($line);
-
-		if ($line =~ /^>\Q$taxon\E/) {
-			$is_desired_seq++;
-		}
-		elsif ($line =~ /^>/ && $is_desired_seq) {
-			last;
-		}
-		elsif ($is_desired_seq) {
-			$seq .= $line;
-		}
-	}
-	close($align);
-
-	return $seq;
 }
 
 sub get_free_cpus {
