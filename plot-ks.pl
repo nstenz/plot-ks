@@ -232,7 +232,7 @@ sub parse_self_blat_output {
 
 		# Determine how to split the input file
 		chomp(my $total_hits = `wc -l $blat_out`);
-		$total_hits =~ s/(^\d+).*/$1/;
+		$total_hits =~ s/(^\s*\d+).*/$1/;
 
 		my $lines_per_thread = ceil($total_hits / $max_forks);
 
@@ -240,7 +240,7 @@ sub parse_self_blat_output {
 		mkdir("$split_blat_out_dir") || die "Could not create directory '$split_blat_out_dir': $!.\n";
 
 		# Split the output from blat
-		run_cmd("split $blat_out $split_blat_out_dir/$blat_out. -l $lines_per_thread");
+		run_cmd("split -l $lines_per_thread $blat_out $split_blat_out_dir/$blat_out.");
 
 		# Run each parition of the blat output concurrently
 
@@ -418,7 +418,7 @@ sub run_kaks_calc {
 
 		# Determine how to split the input file
 		chomp(my $total_hits = `wc -l $paralogs_seqs`);
-		$total_hits =~ s/(^\d+).*/$1/;
+		$total_hits =~ s/(^\s*\d+).*/$1/;
 		$total_hits = $total_hits / 4;
 
 		my $lines_per_thread = ceil($total_hits / $max_forks) * 4;
@@ -428,7 +428,7 @@ sub run_kaks_calc {
 		mkdir("$kaks_calc_out_dir") || die "Could not create directory '$kaks_calc_out_dir': $!.\n";
 
 		# Split the files
-		run_cmd("split $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs. -l $lines_per_thread");
+		run_cmd("split -l $lines_per_thread $paralogs_seqs $kaks_calc_in_dir/$paralogs_seqs.");
 
 		# Run each instance of KaKs_Calculator
 
