@@ -76,12 +76,12 @@ my $settings = "@ARGV";
 # Parse command line options
 GetOptions(
 	"model|m:s" => \$model,
-	"ks_min:f" => \$ks_min,
-	"ks_max:f" => \$ks_max,
-	"bin_size|b:f" => \$bin_size,
-	"exclude_zero|x" => \$exclude_zero,
-	"min_length|l=i" => \$match_length_threshold,
-	"n_threads|T=i" => \$max_forks,
+	"ks-min:f" => \$ks_min,
+	"ks-max:f" => \$ks_max,
+	"bin-size|b:f" => \$bin_size,
+	"exclude-zero|x" => \$exclude_zero,
+	"min-length|l=i" => \$match_length_threshold,
+	"n-threads|T=i" => \$max_forks,
 	"help|h" => \&help,
 	"usage" => \&usage
 );
@@ -117,7 +117,7 @@ else {
 	$project_name = $transcriptome;
 	my @contents = glob("$project_name/*");
 
-	# Determine which transcriptome name by looking for a symlink
+	# Determine the transcriptome name by looking for a symlink
 	my $found_name = 0;
 	foreach my $file (@contents) {
 		if (-l $file) {
@@ -751,12 +751,12 @@ print <<EOF;
 Generate a Ks plot for a given transcriptome in fasta format
 
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
-  -l, --min_length                  the minimum number of basepairs the matching sequences must be (default: 300 bp)
-  -x, --exclude_zero                used to exclude Ks = 0 from plot, useful for Trinity transcriptomes
-  -b, --bin_size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
-  --ks_min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
-  --ks_max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
-  -T, --n_threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
+  -l, --min-length                  the minimum number of basepairs the matching sequences must be (default: 300 bp)
+  -x, --exclude-zero                used to exclude Ks = 0 from plot, useful for Trinity transcriptomes
+  -b, --bin-size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
+  --ks-min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
+  --ks-max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
+  -T, --n-threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
   -h, --help                        display this help and exit
 
 Examples:
@@ -766,7 +766,7 @@ Examples:
   perl plot-ks.pl assembly.fa -x -m NG              generates a Ks (NG model) plot from (0, 3] using a bin size of 0.05, and contigs 
                                                     with at least 300 bp of homologous sequence
 
-  perl plot-ks.pl assembly.fa --ks_max 5 -t 500     generates a Ks (YN model) plot from [0, 5] using a bin size of 0.01, and contigs 
+  perl plot-ks.pl assembly.fa --ks-max 5 -t 500     generates a Ks (YN model) plot from [0, 5] using a bin size of 0.01, and contigs 
                                                     with at least 500 bp of homologous sequence
 
 Mail bug reports and suggestions to <noah.stenz.github\@gmail.com>
