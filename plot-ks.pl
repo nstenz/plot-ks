@@ -94,6 +94,8 @@ die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size <
 die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
 die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
 
+undef($exclude_zero) if ($ks_min > 0);
+
 # Input is a previous run directory, reuse information
 $input_is_dir++ if (-d $transcriptome);
 
@@ -146,18 +148,18 @@ my $final_ks_values = "paralogs-t$match_length_threshold-m$model.csv";
 my $ks_plot_name = "$input_root-t$match_length_threshold-m$model";
 if ($exclude_zero) {
 	if ($bin_size == 0) {
-		$ks_plot_name .= "-density-range\(0-$ks_max].pdf";
+		$ks_plot_name .= "-density-range\($ks_min-$ks_max].pdf";
 	}
 	else {
-		$ks_plot_name .= "-b$bin_size-range\(0-$ks_max].pdf";
+		$ks_plot_name .= "-b$bin_size-range\($ks_min-$ks_max].pdf";
 	}
 }
 else {
 	if ($bin_size == 0) {
-		$ks_plot_name .= "-density-range[0-$ks_max].pdf";
+		$ks_plot_name .= "-density-range[$ks_min-$ks_max].pdf";
 	}
 	else {
-		$ks_plot_name .= "-b$bin_size-range[0-$ks_max].pdf";
+		$ks_plot_name .= "-b$bin_size-range[$ks_min-$ks_max].pdf";
 	}
 }
 
@@ -524,6 +526,7 @@ sub create_ks_plot {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
 				data=read.csv('$final_ks_values'); 
 				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				data <- data[data >= $ks_min];
 				plot(density(data), main=expression(paste('K'[s], ' Density Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
 		}
@@ -531,6 +534,7 @@ sub create_ks_plot {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
 				data=read.csv('$final_ks_values'); 
 				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				data <- data[data >= $ks_min];
 				hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
 					main=expression(paste('K'[s], ' Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
