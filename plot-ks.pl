@@ -484,7 +484,6 @@ sub parse_ks_values {
 
 			# Skip first line containing headers
 			if ($. == 1) {
-				print {$ks_csv} "ks\n";
 				next;
 			}
 
@@ -507,15 +506,15 @@ sub create_ks_plot {
 	if ($exclude_zero) {
 		if ($bin_size == 0) {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
-				data=read.csv('$final_ks_values'); 
-				data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+				data=read.csv('$final_ks_values', header=F); 
+				data <- data\\\$V1[data\\\$V1 <= $ks_max & data\\\$V1 > 0]; 
 				plot(density(data), main=expression(paste('K'[s], ' Density Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
 		}
 		else {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
-				data=read.csv('$final_ks_values'); 
-				data <- data\\\$ks[data\\\$ks <= $ks_max & data\\\$ks > 0]; 
+				data=read.csv('$final_ks_values', header=F); 
+				data <- data\\\$V1[data\\\$V1 <= $ks_max & data\\\$V1 > 0]; 
 				hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
 					main=expression(paste('K'[s], ' Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
@@ -524,16 +523,16 @@ sub create_ks_plot {
 	else {
 		if ($bin_size == 0) {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
-				data=read.csv('$final_ks_values'); 
-				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				data=read.csv('$final_ks_values', header=F); 
+				data <- data\\\$V1[data\\\$V1 <= $ks_max]; 
 				data <- data[data >= $ks_min];
 				plot(density(data), main=expression(paste('K'[s], ' Density Plot for $transcriptome')), 
 					xlab=expression(paste('Pairwise', ' K'[s])), axes=T);\" | $r --no-save") && die;
 		}
 		else {
 			run_cmd("echo \"pdf(file='$ks_plot_name'); 
-				data=read.csv('$final_ks_values'); 
-				data <- data\\\$ks[data\\\$ks <= $ks_max]; 
+				data=read.csv('$final_ks_values', header=F); 
+				data <- data\\\$V1[data\\\$V1 <= $ks_max]; 
 				data <- data[data >= $ks_min];
 				hist(data, breaks=seq($ks_min,$ks_max,by=$bin_size), 
 					main=expression(paste('K'[s], ' Plot for $transcriptome')), 
