@@ -75,10 +75,11 @@ my $settings = "@ARGV";
 
 # Parse command line options
 GetOptions(
-	"model|m:s" => \$model,
-	"ks-min:f" => \$ks_min,
-	"ks-max:f" => \$ks_max,
-	"bin-size|b:f" => \$bin_size,
+	"model|m=s" => \$model,
+	"ks-min=f" => \$ks_min,
+	"ks-max=f" => \$ks_max,
+	"bin-size|b=f" => \$bin_size,
+	"out-dir=s" => \$project_name,
 	"exclude-zero|x" => \$exclude_zero,
 	"min-length|l=i" => \$match_length_threshold,
 	"n-threads|T=i" => \$max_forks,
@@ -754,9 +755,10 @@ print <<EOF;
 Generate a Ks plot for a given transcriptome in fasta format
 
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
-  -l, --min-length                  the minimum number of basepairs the matching sequences must be (default: 300 bp)
-  -x, --exclude-zero                used to exclude Ks = 0 from plot, useful for Trinity transcriptomes
+  -l, --min-length                  the minimum alignment length of paralogous sequences (default: 300 bp)
+  -x, --exclude-zero                used to exclude Ks = 0 from plot, useful for unfiltered Trinity assemblies
   -b, --bin-size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
+  -o, --out-dir                     name of the directory to store output files in (default: "plot-ks" + Unix time of script invocation)
   --ks-min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
   --ks-max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
   -T, --n-threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
