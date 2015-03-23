@@ -95,6 +95,14 @@ die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size <
 die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
 die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
 
+# Check if the ks span is evenly divisible by the bin size
+if ((($ks_max - $ks_min) / $bin_size) =~ /(\.\d+)/) {
+	my $remainder = $1 * $bin_size;
+	logger("WARNING: The span of Ks values you wished to plot ($ks_min to $ks_max) was not evenly divisible by your bin size ($bin_size).");
+	$ks_max -= $remainder;
+	logger("The maximum possible Ks value which will be plotted has therefore been reduced to $ks_max.");
+}
+
 undef($exclude_zero) if ($ks_min > 0);
 
 # Input is a previous run directory, reuse information
