@@ -47,11 +47,11 @@ For further fine-tuning of the script, the following options can also be specifi
 
 ## Output Files
 The names of the output files of this script varies depending on the settings it was run with, the following identifiers will be used as placeholders which represent the actual values of the specified command line options at script run time:
-	* $MODEL      = -m, --model
-	* $MIN_LENGTH = -l, --min-length
-	* $BIN_SIZE   = -b, --bin-size
-	* $KS_MIN     = --ks-min
-	* $KS_MAX     = --ks-max
+* $MODEL      = -m, --model
+* $MIN_LENGTH = -l, --min-length
+* $BIN_SIZE   = -b, --bin-size
+* $KS_MIN     = --ks-min
+* $KS_MAX     = --ks-max
 
 Assuming that an input file with the name 'transcriptome.fa' was specified to the script, the following files can be found in the output directory upon successful completion of the script:
 
