@@ -40,6 +40,8 @@ For further fine-tuning of the script, the following options can also be specifi
 | -o, --out-dir | name of the directory to store output files in | "toca-" + Unix time of script invocation) |
 | --ks-min | lower boundary for x-axis of Ks plot | Ks = 0 |
 | --ks-max | upper boundary for x-axis of Ks plot | Ks = 3 |
+| --pfam-cpus | the number of CPUs to let hmmscan using during pfam analysis | current number of free CPUs |
+| --pfam-search | full path to pfam binary for usage in pfam search | none |
 | -T, --n-threads | the maximum number of CPUs to use concurrently | current number of free CPUs |
 | -h, --help | display help and exit | N/A |
 

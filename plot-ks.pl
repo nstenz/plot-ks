@@ -9,7 +9,7 @@ use Cwd qw(abs_path);
 use File::Path qw(remove_tree);
 use Storable qw(fd_retrieve store_fd);
 
-# Most process we run simultaneously
+# Most processes we run simultaneously
 my $max_forks = get_free_cpus();
 
 # Store parent pid
@@ -39,6 +39,10 @@ my %rev_codon_table = (
 	G => qr/GG./,
 	X => qr/.../,
 );
+
+# Pfam settings
+my $pfam_search;
+my $pfam_cpus = $max_forks;
 
 # Allowed models 
 my %models = (NG => 1, LWL => 1, LPB => 1, MLWL => 1, MLPB => 1, 
@@ -83,6 +87,8 @@ GetOptions(
 	"exclude-zero|x" => \$exclude_zero,
 	"min-length|l=i" => \$match_length_threshold,
 	"n-threads|T=i" => \$max_forks,
+	"pfam-cpus|p=i" => \$pfam_cpus,
+	"pfam-search|s=s" => \$pfam_search,
 	"help|h" => \&help,
 	"usage" => \&usage
 );
@@ -94,6 +100,7 @@ die "Could not locate '$transcriptome'.\n".&usage if (!-e $transcriptome);
 die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size < 0);
 die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
 die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
+die "You must specify the absolute path to an hmmscan binary file to run pfam.\n" if (!defined($pfam_search) && defined($pfam_cpus));
 
 # Check if the ks span is evenly divisible by the bin size
 if ((($ks_max - $ks_min) / $bin_size) =~ /(\.\d+)/) {
@@ -209,7 +216,13 @@ sub run_transdecoder {
 	# Check if the files we need from TransDecoder are present
 	if (!-e "$transcriptome.transdecoder.pep" || !-e "$transcriptome.transdecoder.mRNA") {
 		logger("\nRunning TransDecoder on '$transcriptome'...");
-		run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
+		#run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
+		if (defined($pfam_search)) {
+			run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir --search_pfam $pfam_search --CPU $pfam_cpus");
+		}
+		else {
+			run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
+		}
 
 		# Clean up unneeded files
 		remove_tree($transdecoder_out_dir);
@@ -769,6 +782,8 @@ Generate a Ks plot for a given transcriptome in fasta format
   -o, --out-dir                     name of the directory to store output files in (default: "plot-ks" + Unix time of script invocation)
   --ks-min                          lower boundary for x-axis of Ks plot (default: Ks = 0)
   --ks-max                          upper boundary for x-axis of Ks plot (default: Ks = 3)
+  --pfam-cpus                       the number of CPUs to let hmmscan using during pfam analysis (default: current number of free CPUs)
+  --pfam-search                     full path to pfam binary for usage in pfam search
   -T, --n-threads                   the number of CPUs to use during analysis (default: current number of free CPUs)
   -h, --help                        display this help and exit
 
