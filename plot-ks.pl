@@ -100,10 +100,14 @@ die "Could not locate '$transcriptome'.\n".&usage if (!-e $transcriptome);
 die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size < 0);
 die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
 die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
-die "You must specify the absolute path to an hmmscan binary file to run pfam.\n" if (!defined($pfam_search) && defined($pfam_cpus));
+#die "You must specify the absolute path to an hmmscan binary file to run pfam.\n" if (!defined($pfam_search) && defined($pfam_cpus));
+die "Could not locate hmmscan binary file: '$pfam_search'.\n" if (defined($pfam_search) && !-e $pfam_search);
+
+# Make sure the TransDecoder pfam script can be found if needed
+check_path_for_exec("pfam_runner.pl") if (defined($pfam_search));
 
 # Check if the ks span is evenly divisible by the bin size
-if ((($ks_max - $ks_min) / $bin_size) =~ /(\.\d+)/) {
+if ($bin_size != 0 && (($ks_max - $ks_min) / $bin_size) =~ /(\.\d+)/) {
 	my $remainder = $1 * $bin_size;
 	logger("WARNING: The span of Ks values you wished to plot ($ks_min to $ks_max) was not evenly divisible by your bin size ($bin_size).");
 	$ks_max -= $remainder;
