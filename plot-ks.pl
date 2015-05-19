@@ -617,22 +617,26 @@ sub check_path_for_exec {
 sub parse_fasta {
 	my $filename = shift;
 
+	my $taxon;
 	my %align;
 	open(my $alignment_file, '<', $filename) 
 		or die "Could not open '$filename': $!\n";
-	chomp(my @data = <$alignment_file>);
-	close($alignment_file);
-	
-	my $taxon;
-	foreach my $line (@data) {
+
+	while (my $line = <$alignment_file>) {
+		$line =~ s/^\s+|\s+$//g;
+
+		# Taxon name
 		if ($line =~ /^>(\S+)/) {
 			$taxon = $1;
 		}
 		else {
+			# Taxon sequence
 			$taxon =~ s/-/_/g;
 			$align{$taxon} .= $line;
 		}
 	}
+	close($alignment_file);
+	
 	return %align;
 }
 
