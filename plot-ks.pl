@@ -784,6 +784,7 @@ print <<EOF;
 Generate a Ks plot for a given transcriptome in fasta format
 
   -m, --model                       model used by KaKs_Calculator to determine Ks (default: YN)
+                                        valid models: NG, LWL, LPB, MLWL, MLPB, GY, YN, MYN, MS, MA. See KaKs_Calculator doc for details.
   -l, --min-length                  the minimum alignment length of paralogous sequences (default: 300 bp)
   -x, --exclude-zero                used to exclude Ks = 0 from plot, useful for unfiltered Trinity assemblies
   -b, --bin-size                    size of bins used in histogram of Ks plot, set to 0 for a density plot (default: 0.05)
