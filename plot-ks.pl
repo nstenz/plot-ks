@@ -71,8 +71,15 @@ my $split_blat_out_dir = "blat-out";
 # Check that dependencies can be found in user's PATH
 my $r = check_path_for_exec("R");
 my $blat = check_path_for_exec("blat");
-my $transdecoder = check_path_for_exec("TransDecoder");
 my $kaks_calculator = check_path_for_exec("KaKs_Calculator");
+
+# Check that a version of Transdecoder is present in user's PATH
+my $transdecoder = check_path_for_exec("TransDecoder", 1);
+my $transdecoder_orfs = check_path_for_exec("TransDecoder.LongOrfs", 1);
+my $transdecoder_predict = check_path_for_exec("TransDecoder.Predict", 1);
+if (!defined($transdecoder) || (!defined($transdecoder_orfs) && !defined($transdecoder_predict))) {;
+	die "Could not locate required TransDecoder executables (TransDecoder or TransDecoder.LongOrfs and TransDecoder.Predict) in PATH.\n" 
+}
 
 # Save how script was invoked
 my $settings = "@ARGV";
@@ -93,6 +100,9 @@ GetOptions(
 	"usage" => \&usage
 );
 
+# Check that hmmscan can be located if user wants pfam search
+my $hmmscan = check_path_for_exec("hmmscan") if ($pfam_search);
+
 # Error check input
 my $transcriptome = shift;
 die "You must specify a FASTA file containing transcriptome data for input OR the output directory from the previous execution of this script.\n".&usage if (!defined($transcriptome));
@@ -100,7 +110,6 @@ die "Could not locate '$transcriptome'.\n".&usage if (!-e $transcriptome);
 die "Your Ks plot bin size can't be a negative number.\n".&usage if ($bin_size < 0);
 die "Your Ks plot bin size is larger than your Ks range.\n".&usage if ($bin_size > $ks_max - $ks_min);
 die "The model '$model' does not exist or is not usable by this script.\n".&usage if (!exists($models{$model}));
-#die "You must specify the absolute path to an hmmscan binary file to run pfam.\n" if (!defined($pfam_search) && defined($pfam_cpus));
 die "Could not locate hmmscan binary file: '$pfam_search'.\n" if (defined($pfam_search) && !-e $pfam_search);
 
 # Make sure the TransDecoder pfam script can be found if needed
@@ -220,12 +229,30 @@ sub run_transdecoder {
 	# Check if the files we need from TransDecoder are present
 	if (!-e "$transcriptome.transdecoder.pep" || !-e "$transcriptome.transdecoder.mRNA") {
 		logger("\nRunning TransDecoder on '$transcriptome'...");
-		#run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
-		if (defined($pfam_search)) {
-			run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir --search_pfam $pfam_search --CPU $pfam_cpus");
+
+		# Opt for newer version of TransDecoder if present
+		if ($transdecoder_orfs) {
+			run_cmd("$transdecoder_orfs -t $transcriptome");
+
+			# Need to run things differently to include pfam
+			if (defined($pfam_search)) {
+				run_cmd("$hmmscan --cpu $pfam_cpus --domtblout pfam.domtblout $pfam_search $transcriptome.transdecoder_dir/longest_orfs.pep");
+				run_cmd("$transdecoder_predict -t $transcriptome --retain_pfam_hits pfam.domtblout");
+			}
+			else {
+				run_cmd("$transdecoder_predict -t $transcriptome");
+			}
+			remove_tree("$transcriptome.transdecoder_dir/");
 		}
+		# Old version of TransDecoder
 		else {
-			run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
+			if (defined($pfam_search)) {
+				run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir --search_pfam $pfam_search --CPU $pfam_cpus");
+			}
+			else {
+				run_cmd("$transdecoder -t $transcriptome --workdir $transdecoder_out_dir");
+			}
+			remove_tree($transdecoder_out_dir);
 		}
 
 		# Clean up unneeded files
@@ -599,7 +626,7 @@ sub reverse_translate {
 }
 
 sub check_path_for_exec {
-	my $exec = shift;
+	my ($exec, $continue) = @_;
 	
 	my $path = $ENV{PATH}.":."; # include current directory as well
 	my @path_dirs = split(":", $path);
@@ -610,7 +637,15 @@ sub check_path_for_exec {
 		$exec_path = $dir.$exec if (-e $dir.$exec && -x $dir.$exec && !-d $dir.$exec);
 	}
 
-	die "Could not find the following executable: '$exec'. This script requires this program in your path.\n" if (!defined($exec_path));
+	if (!defined($exec_path) && $continue) {
+		return;
+	}
+	elsif (defined($exec_path)) {
+		return $exec_path;
+	}
+	else {
+		die "Could not find the following executable: '$exec'. This script requires this program in your path.\n";
+	}
 	return $exec_path;
 }
 
