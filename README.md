@@ -37,7 +37,7 @@ For further fine-tuning of the script, the following options can also be specifi
 | -l, --min-length | the minimum alignment length of paralogous sequences | 300 nucleotides |
 | -x, --exclude-zero | used to exclude Ks = 0 from plot, useful for unfiltered Trinity assemblies | N/A |
 | -b, --bin-size | size of bins used in histogram of Ks plot, set to 0 for a density plot | Ks = 0.05 |
-| -o, --out-dir | name of the directory to store output files in | "toca-" + Unix time of script invocation) |
+| -o, --out-dir | name of the directory to store output files in | "plot-ks-" + Unix time of script invocation) |
 | --ks-min | lower boundary for x-axis of Ks plot | Ks = 0 |
 | --ks-max | upper boundary for x-axis of Ks plot | Ks = 3 |
 | --pfam-cpus | the number of CPUs to let hmmscan using during pfam analysis | current number of free CPUs |
